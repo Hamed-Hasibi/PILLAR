@@ -1,5 +1,6 @@
 ## PILLAR: k-mismatch pattern matching (section 4 demo)
 
+## NOTE: Implementation is not fully finished yet.
 This repository contains a C++17 implementation and demo harness for computing k-mismatch occurrences of a pattern `P` in a text `T` using the PILLAR model (P. Charalampopoulos, T. Kociumaka and P. Wellnitz, "Faster Approximate Pattern Matching: A Unified Approach," 2020 IEEE 61st Annual Symposium on Foundations of Computer Science (FOCS) (Section 4). Two executable variants are provided:
 
 - `main` (LibSAIS-based LCP) — uses `libsais` for efficient suffix/LCP functionality within a mocked PILLAR interface.
