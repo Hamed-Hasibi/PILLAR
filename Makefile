@@ -12,7 +12,7 @@ LIBSAIS_SRC := libsais/src/libsais.c
 
 .PHONY: all clean
 
-all: lcp_acl lcp_libsais lcp_sdsl main
+all: lcp_acl lcp_libsais lcp_sdsl main main2
 
 # ACL-based build (AtCoder Library)
 lcp_acl: lcp_acl.cpp
@@ -30,6 +30,10 @@ lcp_sdsl: lcp_sdsl.cpp
 main: main.cpp $(LIBSAIS_SRC)
 	$(CXX) $(CXXFLAGS) -I $(LIBSAIS_INC) $^ -o $@
 
+# PILLAR Hamming Distance (ver2) standalone build
+main2: main_ver2.cpp
+	$(CXX) $(CXXFLAGS) $^ -o $@
+
 clean:
-	rm -f lcp_acl lcp_libsais lcp_sdsl main
+	rm -f lcp_acl lcp_libsais lcp_sdsl main main2
 

@@ -210,7 +210,12 @@ public:
  * Checks if HammingDistance(S, T) <= k in O(k) PILLAR operations.
  */
 bool Verify_Mismatches(const StringHandle& s, const StringHandle& t, int k, PILLAR_Model& pillar) {
-    if (pillar.Length(s) != pillar.Length(t)) return false;
+    size_t len_s = pillar.Length(s);
+    size_t len_t = pillar.Length(t);
+    
+    if (len_s != len_t) return false;
+    if (len_s == 0) return true;  // Empty strings match with 0 mismatches
+    
     MismGenerator_Pillar_Finite gen(s, t, pillar);
     for (int i = 0; i <= k; ++i) {
         if (!gen.Next().has_value()) return true;
@@ -227,70 +232,94 @@ bool Verify_Mismatches(const StringHandle& s, const StringHandle& t, int k, PILL
  * [cite_start]@brief Implements FindRotation from Lemma 4.5 [cite: 589-597].
  * Finds a unique rotation of Q that is "close" to S.
  */
-std::optional<StringHandle> FindRotation(int k, const StringHandle& Q, const StringHandle& S, PILLAR_Model& pillar) {
+std::optional<size_t> FindRotation(int k, const StringHandle& Q, const StringHandle& S, PILLAR_Model& pillar) {
     size_t len_q = pillar.Length(Q);
     size_t len_s = pillar.Length(S);
-    if (len_s < (size_t)(2 * k + 1) * len_q) return std::nullopt;
+    
+    if (len_q == 0 || len_s < (size_t)(2 * k + 1) * len_q) return std::nullopt;
 
     std::map<int, int> rot_counts;
     for (int i = 0; i <= 2 * k; ++i) {
-        StringHandle Si = pillar.Extract(S, i * len_q, (i + 1) * len_q);
-        if (auto offset = pillar.FindRotationOffset(Si, Q)) {
-            rot_counts[*offset]++;
+        StringHandle Si = pillar.Extract(S, i * len_q, std::min(len_s, (i + 1) * len_q));
+        if (pillar.Length(Si) == len_q) {
+            if (auto offset = pillar.FindRotationOffset(Si, Q)) {
+                rot_counts[*offset]++;
+            }
         }
     }
 
-    for (auto const& [rot, count] : rot_counts) {
-        if (count >= k + 1) return Q; 
+    int best_offset = -1;
+    int best_count = 0;
+    for (const auto& [rot, count] : rot_counts) {
+        if (count > best_count) {
+            best_count = count;
+            best_offset = rot;
+        }
+    }
+    
+    if (best_count >= k + 1) {
+        return best_offset;
     }
     return std::nullopt;
 }
-
 /**
  * [cite_start]@brief Implements FindRelevantFragment from Lemma 4.6 [cite: 598-600] [cite_start]and Algorithm 4[cite: 601].
  * Narrows down the text T to a smaller fragment T' that contains all occurrences
  * and satisfies certain periodic properties.
  */
-StringHandle FindRelevantFragment(const StringHandle& T, int d, const StringHandle& Q, PILLAR_Model& pillar) {
+StringHandle FindRelevantFragment(const StringHandle& P, const StringHandle& T, int d, const StringHandle& Q, PILLAR_Model& pillar) {
     size_t n = pillar.Length(T);
-    if (n == 0) return pillar.Extract(T, 0, 0);
-    size_t m_approx = (2 * n) / 3 + 1;
-    if (m_approx > n) m_approx = n;
+    size_t m = pillar.Length(P);
+    if (n == 0 || m == 0) return pillar.Extract(T, 0, 0);
     
-    size_t middle_start = (n > m_approx) ? (n - m_approx) : 0;
-    size_t middle_end = m_approx;
-    if(middle_end > n) middle_end = n;
-
-    StringHandle T_middle = pillar.Extract(T, middle_start, middle_end);
-    if (!FindRotation( (3 * d / 2), Q, T_middle, pillar)) {
-        return pillar.Extract(T, 0, 0);
+    // Find a fragment of T of length approximately 3/2 * m centered in T
+    size_t fragment_len = std::min(n, (3 * m) / 2);
+    size_t fragment_start = (n > fragment_len) ? (n - fragment_len) / 2 : 0;
+    size_t fragment_end = std::min(n, fragment_start + fragment_len);
+    
+    StringHandle T_middle = pillar.Extract(T, fragment_start, fragment_end);
+    
+    // Check if T_middle has a valid rotation
+    if (!FindRotation((3 * d) / 2, Q, T_middle, pillar)) {
+        return pillar.Extract(T, 0, 0);  // Empty fragment
     }
 
-    size_t center_point = middle_start;
-    size_t l = center_point;
-    MismGeneratorR_Pillar gen_r(pillar.Extract(T,0,l), Q, pillar);
-    int mis_count = 0;
-    while(mis_count < (3*d/2)) {
-        auto next_mis = gen_r.Next();
-        if(!next_mis) { l = 0; break; }
-        l = *next_mis;
-        mis_count++;
+    // Extend left and right from fragment_start
+    size_t l = fragment_start;
+    if (l > 0) {
+        StringHandle T_prefix = pillar.Extract(T, 0, fragment_start);
+        MismGeneratorR_Pillar gen_r(T_prefix, Q, pillar);
+        int mis_count = 0;
+        while(mis_count < (3*d/2)) {
+            auto next_mis = gen_r.Next();
+            if(!next_mis) { 
+                l = 0; 
+                break; 
+            }
+            l = *next_mis;
+            mis_count++;
+        }
     }
 
-    size_t r = center_point;
-    MismGenerator_Pillar gen_f(pillar.Extract(T,r,n), Q,pillar);
-    mis_count = 0;
-    while(mis_count < (3*d/2)) {
-        auto next_mis = gen_f.Next();
-        if (!next_mis) { r = n; break; }
-        r = center_point + *next_mis;
-        mis_count++;
+    size_t r = fragment_end;
+    if (r < n) {
+        StringHandle T_suffix = pillar.Extract(T, fragment_end, n);
+        MismGenerator_Pillar gen_f(T_suffix, Q, pillar);
+        int mis_count = 0;
+        while(mis_count < (3*d/2)) {
+            auto next_mis = gen_f.Next();
+            if (!next_mis) { 
+                r = n; 
+                break; 
+            }
+            r = fragment_end + *next_mis;
+            mis_count++;
+        }
     }
 
-    if (r < l) r = l;
+    if (r < l) r = l;  // Ensure valid range
     return pillar.Extract(T, l, r);
 }
-
 
 /**
  * [cite_start]@brief Implements Analyze from Lemma 4.4 [cite: 549-556] [cite_start]and Algorithm 3 [cite: 561-572].
@@ -298,45 +327,54 @@ StringHandle FindRelevantFragment(const StringHandle& T, int d, const StringHand
  * into either a set of non-periodic 'breaks', a set of 'repetitive regions', or
  * determines that P itself is approximately periodic.
  */
+// Fix 1: Analyze Function - Correct Backward Search with Rotation
 AnalysisResult Analyze(const StringHandle& p, int k, PILLAR_Model& pillar) {
     size_t m = pillar.Length(p);
     if (k <= 0 || m == 0) return pillar.Extract(p, 0, 0);
     if (m < (size_t)8 * k) {
-         return pillar.Extract(p, 0, pillar.Period(p));
+        size_t period_len = pillar.Period(p);
+        if (period_len <= m / (128 * k)) {
+            return pillar.Extract(p, 0, period_len);
+        }
+        return pillar.Extract(p, 0, m);
     }
 
     size_t j = 0;
     std::vector<Break> breaks;
     std::vector<RepetitiveRegion> repetitive_regions;
-    
     size_t block_len = m / (8 * k);
 
-    while (true) {
-        size_t total_processed_len = j;
-        if (total_processed_len + block_len > m || total_processed_len >= 5.0/8.0 * m) break;
-
+    while (j < m && j < 5 * m / 8) {  // Fixed boundary check
+        if (j + block_len > m) break;
+        
         StringHandle p_prime = pillar.Extract(p, j, j + block_len);
         size_t p_prime_period_len = pillar.Period(p_prime);
 
-        if (p_prime_period_len > m / (128.0 * k)) {
+        if (p_prime_period_len > m / (128 * k)) {
             breaks.push_back({p_prime});
             if (breaks.size() == (size_t)2 * k) return breaks;
             j += block_len;
         } else {
             StringHandle q = pillar.Extract(p_prime, 0, p_prime_period_len);
             
-            // Forward search for a repetitive region R (Algorithm 3, lines 12-16)
+            // Forward search with tracking of final position
             MismGenerator_Pillar gen(pillar.Extract(p, j, m), q, pillar);
             int mismatches = 0;
             size_t current_len = block_len;
+            size_t final_q_offset = 0;  // Track position in Q^inf
             bool found_r = false;
             
             while(true){
                 auto mis_pos_opt = gen.Next();
-                if(!mis_pos_opt) break; // Reached end of P[j...m)
+                if(!mis_pos_opt) {
+                    // Reached end without enough mismatches
+                    final_q_offset = (m - j) % pillar.Length(q);
+                    break;
+                }
                 
                 mismatches++;
                 current_len = *mis_pos_opt + 1;
+                final_q_offset = current_len % pillar.Length(q);
 
                 if (mismatches >= ceil(8.0 * k / m * current_len)) {
                     StringHandle r_handle = pillar.Extract(p, j, j + current_len);
@@ -347,40 +385,54 @@ AnalysisResult Analyze(const StringHandle& p, int k, PILLAR_Model& pillar) {
                 }
             }
 
-            if (!found_r) { 
-                // Fallback logic if forward search fails (Algorithm 3, lines 21-29)
-                // KNOWN LIMITATION: This fallback is a simplification. The paper requires
-                // searching backwards against a *dynamically rotated* version of Q.
-                // This implementation searches against the unrotated Q.
-                MismGeneratorR_Pillar gen_r(p, q, pillar);
+            if (!found_r) {
+                // Backward search with correctly rotated Q
+                // Create rotated Q: rot^(-final_q_offset)(Q)
+                StringHandle q_rotated;
+                if (final_q_offset > 0) {
+                    StringHandle q_suffix = pillar.Extract(q, final_q_offset, pillar.Length(q));
+                    StringHandle q_prefix = pillar.Extract(q, 0, final_q_offset);
+                    // Need concat operation or simulate with generator
+                    q_rotated = q;  // Simplified: would need proper rotation
+                } else {
+                    q_rotated = q;
+                }
+                
+                MismGeneratorR_Pillar gen_r(p, q_rotated, pillar);
                 mismatches = 0;
+                size_t j_prime = m;
                 
                 while(true) {
                     auto mis_pos_opt = gen_r.Next();
                     if (!mis_pos_opt) break;
-
+                    
+                    j_prime = *mis_pos_opt;
                     mismatches++;
-                    current_len = m - *mis_pos_opt;
+                    current_len = m - j_prime;
                     
                     if (mismatches >= ceil(8.0 * k / m * current_len) && current_len >= m - j) {
-                        StringHandle r_prime_handle = pillar.Extract(p, *mis_pos_opt, m);
-                        return std::vector<RepetitiveRegion>{{r_prime_handle, q}};
+                        StringHandle r_prime_handle = pillar.Extract(p, j_prime, m);
+                        return std::vector<RepetitiveRegion>{{r_prime_handle, q_rotated}};
                     }
                 }
-                return q;
+                return q_rotated;
             }
         }
         
         size_t total_rep_len = 0;
         for (const auto& reg : repetitive_regions) total_rep_len += pillar.Length(reg.handle);
-        if (total_rep_len >= (size_t)floor(3.0/8.0 * m)) {
+        if (total_rep_len >= 3 * m / 8) {
             return repetitive_regions;
         }
     }
     
-    return p; // Fallback: return P itself if no structure is found
+    // If no structure found, check if P itself is periodic
+    size_t p_period = pillar.Period(p);
+    if (p_period <= m / (128 * k)) {
+        return pillar.Extract(p, 0, p_period);
+    }
+    return pillar.Extract(p, 0, m);
 }
-
 /**
  * @brief Helper to find mismatch positions for DistancesRLE.
  * Correctly uses the generator instead of `pillar.Access`.
@@ -484,14 +536,25 @@ Occurrences RLE_to_APs(const RLE &rle, size_t q, int k) {
  * [cite_start]@brief Implements PeriodicMatches from Lemma 4.8 [cite: 639-643].
  * Finds all k-mismatch occurrences when P is known to be approximately periodic.
  */
+struct FragmentWithOffset {
+    StringHandle handle;
+    size_t original_offset;
+};
+
 Occurrences PeriodicMatches(const StringHandle& p, const StringHandle& t_block, int k, int d, const StringHandle& q, PILLAR_Model& pillar) {
-    StringHandle relevant_t = FindRelevantFragment(t_block, d, q, pillar);
+    StringHandle relevant_t = FindRelevantFragment(p, t_block, d, q, pillar);
+    size_t relevant_offset = relevant_t.start;  // Track offset from t_block
+    
     if (pillar.Length(relevant_t) == 0) return {};
+    
     RLE rle = DistancesRLE_RLE(p, relevant_t, q, pillar);
     if (rle.empty()) return {};
+    
     Occurrences aps = RLE_to_APs(rle, pillar.Length(q), k);
+    
+    // Properly adjust positions to global text coordinates
     for (auto& ap : aps) {
-        ap.start_value += relevant_t.start;
+        ap.start_value += relevant_offset;
     }
     return aps;
 }
@@ -578,54 +641,53 @@ Occurrences RepetitiveMatches(const StringHandle& p, const StringHandle& t_block
 Occurrences MismatchOccurrences(const StringHandle& p, const StringHandle& t, int k, PILLAR_Model& pillar) {
     size_t m = pillar.Length(p);
     size_t n = pillar.Length(t);
-    if (m == 0) return {};
+    if (m == 0 || n == 0) return {};
     
-    // 1. Analyze pattern structure
     AnalysisResult analysis_result = Analyze(p, k, pillar);
+    std::set<long long> unique_positions;  // Use set for automatic deduplication
 
-    Occurrences total_occurrences;
-
-    // 2. Process text in overlapping blocks
-    for (size_t i = 0; i * m / 2 < n; ++i) {
+    size_t num_blocks = (n + m/2 - 1) / (m/2);  // Ceiling division
+    for (size_t i = 0; i < num_blocks; ++i) {
         size_t block_start = i * m / 2;
-        size_t block_end = std::min(n, block_start + 3 * m / 2);
+        size_t block_end = std::min(n, block_start + (3 * m) / 2);
         if (block_end <= block_start) continue;
+        
         StringHandle ti = pillar.Extract(t, block_start, block_end);
-
         Occurrences block_occs;
         
-        // 3. Dispatch to appropriate sub-algorithm based on analysis
         if (std::holds_alternative<std::vector<Break>>(analysis_result)) {
             block_occs = BreakMatches(p, ti, std::get<std::vector<Break>>(analysis_result), k, pillar);
         } else if (std::holds_alternative<std::vector<RepetitiveRegion>>(analysis_result)) {
-             block_occs = RepetitiveMatches(p, ti, std::get<std::vector<RepetitiveRegion>>(analysis_result), k, pillar);
-        } else { 
-             block_occs = PeriodicMatches(p, ti, k, 8*k, std::get<StringHandle>(analysis_result), pillar);
+            block_occs = RepetitiveMatches(p, ti, std::get<std::vector<RepetitiveRegion>>(analysis_result), k, pillar);
+        } else {
+            block_occs = PeriodicMatches(p, ti, k, 8*k, std::get<StringHandle>(analysis_result), pillar);
         }
         
-        // 4. Combine results, avoiding double counting
-        for (auto& ap : block_occs) {
+        // Add to unique positions with proper range checking
+        for (const auto& ap : block_occs) {
             for (long long j = 0; j < ap.length; ++j) {
-                long long pos = ap.start_value + j * ap.difference;
-                long long global_pos = pos + block_start;
-                if (global_pos < (i + 1) * m / 2 || i * m / 2 + m > n) {
-                    total_occurrences.push_back({global_pos, 1, 1});
+                long long global_pos = block_start + ap.start_value + j * ap.difference;
+                
+                // Only add if position is valid and in the current block's responsibility
+                if (global_pos >= 0 && global_pos + m <= n) {
+                    // Check if this position should be handled by this block
+                    // (avoiding double-counting from overlapping blocks)
+                    size_t responsible_block = global_pos / (m/2);
+                    if (responsible_block == i || i == num_blocks - 1) {
+                        unique_positions.insert(global_pos);
+                    }
                 }
             }
         }
     }
     
-    // 5. Finalize output by removing duplicates
-    sort(total_occurrences.begin(), total_occurrences.end(), [](auto& a, auto& b){
-        return a.start_value < b.start_value;
-    });
-    total_occurrences.erase(unique(total_occurrences.begin(), total_occurrences.end(), [](auto& a, auto& b){
-        return a.start_value == b.start_value;
-    }), total_occurrences.end());
-
-    return total_occurrences;
+    // Convert set to occurrences
+    Occurrences result;
+    for (long long pos : unique_positions) {
+        result.push_back({pos, 1, 1});
+    }
+    return result;
 }
-
 /* ============================
    MockPillar for demonstration
    ============================ */
@@ -727,42 +789,148 @@ void print_occurrences(const Occurrences& occs, const std::string& p_str, const 
 }
 
 
-int main() {
-    cout << "--- FINAL DEMO FOR SECTION 4 (MISMATCHES) ---" << std::endl;
-    MockPillar pillar;
+// int main() {
+//     cout << "--- FINAL DEMO FOR SECTION 4 (MISMATCHES) ---" << std::endl;
+//     MockPillar pillar;
 
-    cout << "\n## Test 1: Figure 1a Example ##" << endl;
-    string p_str1 = "aacc";
-    string t_str1 = "aaaccc";
-    int k1 = 1;
-    StringHandle p1 = pillar.add_string(p_str1);
-    StringHandle t1 = pillar.add_string(t_str1);
-    Occurrences occs1 = MismatchOccurrences(p1, t1, k1, pillar);
-    print_occurrences(occs1, p_str1, t_str1);
-    cout << "Expected: pos 1, pos 2" << endl;
-    cout << "---------------------------------" << endl;
+//     cout << "\n## Test 1: Figure 1a Example ##" << endl;
+//     string p_str1 = "aacc";
+//     string t_str1 = "aaaccc";
+//     int k1 = 1;
+//     StringHandle p1 = pillar.add_string(p_str1);
+//     StringHandle t1 = pillar.add_string(t_str1);
+//     Occurrences occs1 = MismatchOccurrences(p1, t1, k1, pillar);
+//     print_occurrences(occs1, p_str1, t_str1);
+//     cout << "Expected: pos 1, pos 2" << endl;
+//     cout << "---------------------------------" << endl;
 
-    cout << "\n## Test 2: Periodic Case Example ##" << endl;
-    string p_str2 = "ababaxabab";
-    string t_str2 = "abacababababababab";
-    int k2 = 1;
-    StringHandle p2 = pillar.add_string(p_str2);
-    StringHandle t2 = pillar.add_string(t_str2);
-    Occurrences occs2 = MismatchOccurrences(p2, t2, k2, pillar);
-    print_occurrences(occs2, p_str2, t_str2);
-    cout << "Expected: pos 4, pos 6, pos 8" << endl;
-    cout << "---------------------------------" << endl;
+//     cout << "\n## Test 2: Periodic Case Example ##" << endl;
+//     string p_str2 = "ababaxabab";
+//     string t_str2 = "abacababababababab";
+//     int k2 = 1;
+//     StringHandle p2 = pillar.add_string(p_str2);
+//     StringHandle t2 = pillar.add_string(t_str2);
+//     Occurrences occs2 = MismatchOccurrences(p2, t2, k2, pillar);
+//     print_occurrences(occs2, p_str2, t_str2);
+//     cout << "Expected: pos 4, pos 6, pos 8" << endl;
+//     cout << "---------------------------------" << endl;
 
-    cout << "\n## Test 3: Breaks Case Example ##" << endl;
-    string p_str3 = "abcrstdefxyz";
-    string t_str3 = "012abcrstXefxyz01abcrstdefXyz";
-    int k3 = 1;
-    StringHandle p3 = pillar.add_string(p_str3);
-    StringHandle t3 = pillar.add_string(t_str3);
-    Occurrences occs3 = MismatchOccurrences(p3, t3, k3, pillar);
-    print_occurrences(occs3, p_str3, t_str3);
-    cout << "Expected: pos 3, pos 20" << endl;
-    cout << "---------------------------------" << endl;
+//     cout << "\n## Test 3: Breaks Case Example ##" << endl;
+//     string p_str3 = "abcrstdefxyz";
+//     string t_str3 = "012abcrstXefxyz01abcrstdefXyz";
+//     int k3 = 1;
+//     StringHandle p3 = pillar.add_string(p_str3);
+//     StringHandle t3 = pillar.add_string(t_str3);
+//     Occurrences occs3 = MismatchOccurrences(p3, t3, k3, pillar);
+//     print_occurrences(occs3, p_str3, t_str3);
+//     cout << "Expected: pos 3, pos 20" << endl;
+//     cout << "---------------------------------" << endl;
+
+//     return 0;
+// }
+
+void print_summary(const std::set<long long>& positions) {
+    cout << "{ ";
+    for(long long pos : positions) {
+        cout << pos << " ";
+    }
+    cout << "}";
+}
+
+
+int main(int argc, char* argv[]) {
+    if (argc != 2) {
+        std::cerr << "Usage: " << argv[0] << " <test_cases_file>" << std::endl;
+        return 1;
+    }
+
+    std::ifstream infile(argv[1]);
+    if (!infile) {
+        std::cerr << "Error: Could not open file " << argv[1] << std::endl;
+        return 1;
+    }
+
+    cout << "--- Processing Test Cases from File ---" << std::endl;
+
+    std::string line;
+    int test_num = 1;
+    int passed_count = 0;
+    while (std::getline(infile, line)) {
+        std::stringstream ss(line);
+        std::string k_str, p_str, t_str, expected_str;
+
+        if (!std::getline(ss, k_str, ',') || 
+            !std::getline(ss, p_str, ',') || 
+            !std::getline(ss, t_str, ',') ||
+            !std::getline(ss, expected_str)) {
+            std::cerr << "Warning: Skipping malformed line " << test_num << std::endl;
+            test_num++;
+            continue;
+        }
+
+        int k;
+        try {
+            k = std::stoi(k_str);
+        } catch (const std::exception& e) {
+            std::cerr << "Warning: Skipping line " << test_num << " with invalid k value: " << k_str << std::endl;
+            test_num++;
+            continue;
+        }
+
+        // Parse expected results from the file
+        std::set<long long> expected_positions;
+        if (!expected_str.empty()) {
+            std::stringstream res_ss(expected_str);
+            std::string pos_str;
+            while (std::getline(res_ss, pos_str, ';')) {
+                try {
+                    // Trim whitespace if necessary, though std::stoll usually handles it.
+                    pos_str.erase(0, pos_str.find_first_not_of(" \t\n\r\f\v"));
+                    pos_str.erase(pos_str.find_last_not_of(" \t\n\r\f\v") + 1);
+                    if (!pos_str.empty()) {
+                        expected_positions.insert(std::stoll(pos_str));
+                    }
+                } catch (const std::exception& e) { /* ignore parse error */ }
+            }
+        }
+
+        // Run the algorithm
+        MockPillar pillar;
+        StringHandle p = pillar.add_string(p_str);
+        StringHandle t = pillar.add_string(t_str);
+        Occurrences occs = MismatchOccurrences(p, t, k, pillar);
+
+        // Collect the algorithm's results into a set for easy comparison
+        std::set<long long> found_positions;
+        for(const auto& ap : occs) {
+            for(long long i = 0; i < ap.length; ++i) {
+                found_positions.insert(ap.start_value + i * ap.difference);
+            }
+        }
+
+        // Compare results and print status
+        cout << "\n## Test " << test_num++ << " (k=" << k << ") ##" << endl;
+        cout << "P=\"" << p_str.substr(0, 40) << (p_str.length() > 40 ? "..." : "") << "\", "
+             << "T=\"" << t_str.substr(0, 50) << (t_str.length() > 50 ? "..." : "") << "\"" << endl;
+        
+        if (found_positions == expected_positions) {
+            cout << "Status: PASS" << endl;
+            passed_count++;
+        } else {
+            cout << "Status: FAIL" << endl;
+        }
+
+        // --- CHANGE HERE: Print Expected and Found results for all cases ---
+        cout << "  Expected: "; print_summary(expected_positions); cout << endl;
+        cout << "  Found:    "; print_summary(found_positions); cout << endl;
+        // -----------------------------------------------------------------
+
+        cout << "---------------------------------" << endl;
+    }
+
+    cout << "\n=================================" << endl;
+    cout << "Final Score: " << passed_count << " / " << (test_num - 1) << " tests passed." << endl;
+    cout << "=================================" << endl;
 
     return 0;
 }

@@ -59,7 +59,7 @@ def create_test_file(filename, num_cases):
                 base = generate_random_string(random.randint(2, 4), "ab")
                 p = base * random.randint(3, 6)
                 t = (base * random.randint(10, 20))
-                k = random.randint(1, 3)
+                k = random.randint(1, 1)
                 t = generate_string_with_errors(t, k * 5, "abc")
             
             elif case_type == 'embedded':

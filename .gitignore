@@ -1,0 +1,16 @@
+# Build artifacts
+main
+main2
+lcp_acl
+lcp_libsais
+lcp_sdsl
+
+# Generic object and dependency files
+*.o
+*.obj
+*.d
+
+# Other temporary files
+*.swp
+*.swo
+.DS_Store
