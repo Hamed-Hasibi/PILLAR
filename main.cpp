@@ -568,6 +568,10 @@ Occurrences MismatchOccurrences(const StringHandle& p, const StringHandle& t, in
     size_t m = pillar.Length(p);
     size_t n = pillar.Length(t);
     if (m == 0) return {};
+    // Handle k==0 as exact matching to avoid degenerate analysis
+    if (k == 0) {
+        return pillar.ExactMatches(p, t);
+    }
     
     AnalysisResult analysis_result = Analyze(p, k, pillar);
 
