@@ -642,14 +642,20 @@ Occurrences MismatchOccurrences(const StringHandle& p, const StringHandle& t, in
     size_t m = pillar.Length(p);
     size_t n = pillar.Length(t);
     if (m == 0 || n == 0) return {};
+    // Exact-match fast path for k==0 avoids unnecessary structure analysis
+    if (k == 0) {
+        return pillar.ExactMatches(p, t);
+    }
     
     AnalysisResult analysis_result = Analyze(p, k, pillar);
     std::set<long long> unique_positions;  // Use set for automatic deduplication
 
-    size_t num_blocks = (n + m/2 - 1) / (m/2);  // Ceiling division
+    // Avoid division by zero when m == 1
+    size_t half = max<size_t>(1, m / 2);
+    size_t num_blocks = (n + half - 1) / half;  // Ceiling division
     for (size_t i = 0; i < num_blocks; ++i) {
-        size_t block_start = i * m / 2;
-        size_t block_end = std::min(n, block_start + (3 * m) / 2);
+        size_t block_start = i * half;
+        size_t block_end = std::min(n, block_start + 3 * half);
         if (block_end <= block_start) continue;
         
         StringHandle ti = pillar.Extract(t, block_start, block_end);
